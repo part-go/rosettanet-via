@@ -42,5 +42,5 @@ go run ./cmd/via_server.go -registerAddress :20030 -proxyAddress :20031
 ```
 4. 启动这个VIA服务后面的task服务：
 ```
-go run ./testtask/cmd/task_server.go -partner partner_1 -address :20040 -registerAddress :20030 -destProxyAddress :10031
+go run ./testtask/cmd/task_server.go -partner partner_2 -address :20040 -registerAddress :20030 -destProxyAddress :10031
 ```
