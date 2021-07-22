@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package test;
+
+option go_package = "./test";
+
+
+message MetricList {
+    repeated int64 metric = 1;
+}
+
+message Metric {
+    int64 metric = 1;
+}
+
+message SumResponse {
+    int32 count = 1;
+    int64 val = 2;
+}
+
+
+
+service MathService {
+
+    //Unary RPC（一元RPC）
+    //客户端一次调用，服务端返回一次结果
+    rpc Sum_Unary(MetricList) returns (SumResponse){};
+
+    // Server Streaming RPC （ 服务器流式RPC）
+    // 客户端一次调用，服务端把计算sum的中间结果，持续返回给客户端
+    rpc Sum_ServerStreaming(MetricList) returns (stream SumResponse){};
+
+    //Client Streaming RPC （ 客户端流式RPC）
+    //客户端持续发送数据，服务端等客户端发送完成后，把计算结果一次返回给客户端
+    rpc Sum_ClientStreaming(stream Metric) returns (SumResponse){};
+
+    //Bidirectional Streaming RPC （双向流式RPC）
+    //客户端持续发送数据，服务端把计算sum的中间结果，持续返回给客户端，直到客户端停止发送数据
+    rpc Sum_BidiStreaming(stream Metric) returns (stream SumResponse){};
+}

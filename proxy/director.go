@@ -26,37 +26,38 @@ type StreamDirector func(ctx context.Context, fullMethodName string) (context.Co
 
 //任务的服务信息
 type RegisteredTask struct {
-	TaskId string			//任务id
-	ServiceType string		//任务服务类型
-	Address string			//任务服务地址,ip:port
-	Conn *grpc.ClientConn   //proxy到任务服务的grpc调用连接，此链接在任务服务到proxy注册后，由proxy建立
+	TaskId      string           //任务id
+	ServiceType string           //任务服务类型
+	Address     string           //任务服务地址,ip:port
+	Conn        *grpc.ClientConn //proxy到任务服务的grpc调用连接，此链接在任务服务到proxy注册后，由proxy建立
 }
 
 // 存放注册的任务服务进程信息
 var RegisteredTaskMap = make(map[string]*RegisteredTask)
 
-const metadataKey = "task_id"
+const MetadataKey = "task_id"
 
 func GetDirector() StreamDirector {
 	director := func(ctx context.Context, fullName string) (context.Context, *grpc.ClientConn, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		log.Printf("收到的metadata.md: %v", md)
 		if ok {
-			if taskId, exists := md[metadataKey]; exists {
-				if _, 	ok:=RegisteredTaskMap[taskId[0]]; ok{
+			if taskId, exists := md[MetadataKey]; exists {
+				if _, ok := RegisteredTaskMap[taskId[0]]; ok {
 					outCtx, _ := context.WithCancel(ctx)
 
 					// Explicitly copy the metadata, otherwise the tests will fail.
 					outCtx = metadata.NewOutgoingContext(outCtx, md.Copy())
 					return outCtx, RegisteredTaskMap[taskId[0]].Conn, nil
+				} else {
+					return ctx, nil, status.Errorf(codes.Unknown, "cannot find connection for registered task")
 				}
-			}else{
+			} else {
 				return ctx, nil, status.Errorf(codes.NotFound, "task id not found")
 			}
+		} else {
+			return ctx, nil, status.Errorf(codes.Unknown, "cannot get metadata from incoming context")
 		}
-
-		return ctx, nil, status.Errorf(codes.Unknown, "unknown exception")
 	}
 	return director
 }
-

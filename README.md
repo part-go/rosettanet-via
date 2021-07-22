@@ -11,7 +11,7 @@ protoc --go_out=plugins=grpc:. register/proto/*.proto
 
 #### 测试用task服务go代码生成：
 ```
-protoc --go_out=plugins=grpc:. testtask/proto/*.proto
+protoc --go_out=plugins=grpc:. test/proto/*.proto
 ```
 
 #### VIA源码的启动方式：
@@ -34,7 +34,7 @@ go run ./cmd/via_server.go -registerAddress :10030 -proxyAddress :10031
 ```
 2. 启动这个VIA服务后面的task服务：
 ```
-go run ./testtask/cmd/task_server.go -partner partner_1 -address :10040 -registerAddress :10030 -destProxyAddress :20031
+go run ./test/cmd/math_server.go -partner partner_1 -address :10040 -registerAddress :10030 -destProxyAddress :20031
 ```
 3. 启动另一个VIA服务：
 ```
@@ -42,5 +42,12 @@ go run ./cmd/via_server.go -registerAddress :20030 -proxyAddress :20031
 ```
 4. 启动这个VIA服务后面的task服务：
 ```
-go run ./testtask/cmd/task_server.go -partner partner_2 -address :20040 -registerAddress :20030 -destProxyAddress :10031
+go run ./test/cmd/math_server.go -partner partner_2 -address :20040 -registerAddress :20030 -destProxyAddress :10031
 ```
+
+在两个启动的task服务的控制台，按提示输入命令，即可演示各种模式grpc。
+
+命令行提示：
+
+unary|serverStreaming|clientStreaming|bidi
+
