@@ -1,8 +1,13 @@
 ### VIA服务说明 
 
-在启动本地task服务时，需要到VIA注册task服务的taskId/serviceType/address信息。
+在启动本地task服务进程时，需要到VIA注册task服务的taskId/partyId/serviceType/address信息。
 
-远程task服务访问本地服务的grpc服务时，只需要访问本地VIA服务提供的proxyAddress即可。
+本地task服务进程需要访问远程task服务进程的grpc接口时，需要在metadata中，携带本次任务的taskId,以及远程task服务进程的的partyId。
+相应的metadata key定义为：
+```
+MetadataTaskIdKey = "task_id"
+MetadataPartyIdKey = "party_id"
+```
 
 #### 注册服务go代码生成：
 ```
