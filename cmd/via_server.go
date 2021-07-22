@@ -17,10 +17,9 @@ import (
 )
 
 var (
-	registerAddress    string
-	proxyAddress string
+	registerAddress string
+	proxyAddress    string
 )
-
 
 func init() {
 	flag.StringVar(&registerAddress, "registerAddress", ":10031", "register listen address")
@@ -28,8 +27,7 @@ func init() {
 	flag.Parse()
 }
 
-
-type ProxyServer struct {}
+type ProxyServer struct{}
 
 func NewProxyServer() *ProxyServer {
 	return &ProxyServer{}
@@ -37,33 +35,32 @@ func NewProxyServer() *ProxyServer {
 
 func (t *ProxyServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
 
-	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, ServiceType: req.ServiceType, Address: req.Address}
+	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
 
 	log.Printf("收到注册请求：%v", req)
 
 	//得到调用者信息，然后proxy连上它，以便后续转发数据流
-	if _, ok := peer.FromContext(ctx); ok{
+	if _, ok := peer.FromContext(ctx); ok {
 		//获得conn
 		log.Printf("回拨local task server, %s", registeredTask.Address)
 		conn, err := grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
 
-
-		if(err!=nil){
+		if err != nil {
 			log.Printf("回拨local task server失败")
 			return &register.Boolean{Result: false}, err
 		}
 		log.Printf("回拨local task server成功")
 		registeredTask.Conn = conn
-		proxy.RegisteredTaskMap[registeredTask.TaskId] = registeredTask
+		proxy.RegisteredTaskMap[registeredTask.TaskId+"_"+registeredTask.PartyId] = registeredTask
 
 		return &register.Boolean{Result: true}, nil
-	}else{
+	} else {
 		log.Printf("获取local task server地址失败")
-		return &register.Boolean{Result: false}, errors.New ("cannot retrieve the task info")
+		return &register.Boolean{Result: false}, errors.New("cannot retrieve the task info")
 	}
 }
 
-func main(){
+func main() {
 
 	//via本身提供的注册服务
 	registerListener, err := net.Listen("tcp", registerAddress)
@@ -97,7 +94,6 @@ func main(){
 
 	waitForGracefulShutdown(registerServer, proxyServer)
 }
-
 
 func waitForGracefulShutdown(registerServer, registerListener *grpc.Server) {
 	interruptChan := make(chan os.Signal, 1)

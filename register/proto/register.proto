@@ -9,8 +9,9 @@ message Boolean {
 
 message RegisterReq {
     string taskId=1;
-    string serviceType=2;
-    string address=3;
+    string partyId=2;
+    string serviceType=3;
+    string address=4;
 }
 
 service RegisterService {

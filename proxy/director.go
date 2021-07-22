@@ -27,6 +27,7 @@ type StreamDirector func(ctx context.Context, fullMethodName string) (context.Co
 //任务的服务信息
 type RegisteredTask struct {
 	TaskId      string           //任务id
+	PartyId     string           //任务参与方唯一id
 	ServiceType string           //任务服务类型
 	Address     string           //任务服务地址,ip:port
 	Conn        *grpc.ClientConn //proxy到任务服务的grpc调用连接，此链接在任务服务到proxy注册后，由proxy建立
@@ -35,23 +36,30 @@ type RegisteredTask struct {
 // 存放注册的任务服务进程信息
 var RegisteredTaskMap = make(map[string]*RegisteredTask)
 
-const MetadataKey = "task_id"
+const MetadataTaskIdKey = "task_id"
+const MetadataPartyIdKey = "party_id"
 
 func GetDirector() StreamDirector {
 	director := func(ctx context.Context, fullName string) (context.Context, *grpc.ClientConn, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
 		log.Printf("收到的metadata.md: %v", md)
 		if ok {
-			if taskId, exists := md[MetadataKey]; exists {
-				if _, ok := RegisteredTaskMap[taskId[0]]; ok {
-					outCtx, _ := context.WithCancel(ctx)
+			if taskId, exists := md[MetadataTaskIdKey]; exists {
+				if partyId, exists := md[MetadataPartyIdKey]; exists {
+					key := taskId[0] + "_" + partyId[0]
+					if _, ok := RegisteredTaskMap[key]; ok {
+						outCtx, _ := context.WithCancel(ctx)
 
-					// Explicitly copy the metadata, otherwise the tests will fail.
-					outCtx = metadata.NewOutgoingContext(outCtx, md.Copy())
-					return outCtx, RegisteredTaskMap[taskId[0]].Conn, nil
+						// Explicitly copy the metadata, otherwise the tests will fail.
+						outCtx = metadata.NewOutgoingContext(outCtx, md.Copy())
+						return outCtx, RegisteredTaskMap[key].Conn, nil
+					} else {
+						return ctx, nil, status.Errorf(codes.Unknown, "cannot find connection for registered task")
+					}
 				} else {
-					return ctx, nil, status.Errorf(codes.Unknown, "cannot find connection for registered task")
+					return ctx, nil, status.Errorf(codes.NotFound, "party id not found")
 				}
+
 			} else {
 				return ctx, nil, status.Errorf(codes.NotFound, "task id not found")
 			}

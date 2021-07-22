@@ -31,6 +31,7 @@ var (
 type Command func(*mathServer) error
 
 const DefaultTaskId string = "testTaskId"
+const DefaultPartyId string = "testPartyId"
 
 func init() {
 	flag.StringVar(&partner, "partner", "partner_1", "partner")
@@ -54,7 +55,8 @@ type mathServer struct {
 
 func (s *mathServer) init() {
 	ctx := context.Background()
-	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataKey, DefaultTaskId)
+	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataTaskIdKey, DefaultTaskId)
+	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataPartyIdKey, DefaultPartyId)
 	s.ctx = ctx
 	if conn, err := grpc.Dial(destProxyAddress, grpc.WithInsecure()); err != nil {
 		log.Fatalf("did not connect to dest proxy: %v", err)
@@ -148,7 +150,7 @@ func registerTask() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	r, err := c.Register(ctx, &register.RegisterReq{TaskId: DefaultTaskId, Address: address})
+	r, err := c.Register(ctx, &register.RegisterReq{TaskId: DefaultTaskId, PartyId: DefaultPartyId, Address: address})
 	if err != nil {
 		return err
 	}
