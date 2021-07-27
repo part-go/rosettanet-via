@@ -17,23 +17,21 @@ import (
 )
 
 var (
-	registerAddress string
-	proxyAddress    string
+	address string
 )
 
 func init() {
-	flag.StringVar(&registerAddress, "registerAddress", ":10031", "register listen address")
-	flag.StringVar(&proxyAddress, "proxyAddress", ":10031", "proxy listen address")
+	flag.StringVar(&address, "address", ":10031", "VIA server listen address")
 	flag.Parse()
 }
 
-type ProxyServer struct{}
+type VIAServer struct{}
 
-func NewProxyServer() *ProxyServer {
-	return &ProxyServer{}
+func NewVIAServer() *VIAServer {
+	return &VIAServer{}
 }
 
-func (t *ProxyServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
+func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
 
 	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
 
@@ -61,41 +59,28 @@ func (t *ProxyServer) Register(ctx context.Context, req *register.RegisterReq) (
 }
 
 func main() {
-
-	//via本身提供的注册服务
-	registerListener, err := net.Listen("tcp", registerAddress)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-	registerServer := grpc.NewServer()
-	//注册本身提供的服务
-	register.RegisterRegisterServiceServer(registerServer, NewProxyServer())
-
 	//via提供的代理服务
-	proxyListener, err := net.Listen("tcp", proxyAddress)
+	viaListener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	//把所有服务都作为非注册服务，通过TransparentHandler来处理
-	proxyServer := grpc.NewServer(
+	viaServer := grpc.NewServer(
 		grpc.ForceServerCodec(proxy.Codec()),
 		grpc.UnknownServiceHandler(proxy.TransparentHandler(proxy.GetDirector())),
 	)
+	//注册本身提供的服务
+	register.RegisterRegisterServiceServer(viaServer, NewVIAServer())
 
-	log.Printf("starting register.Server at: %v", registerListener.Addr().String())
+	log.Printf("starting VIA Server at: %v", viaListener.Addr().String())
 	go func() {
-		registerServer.Serve(registerListener)
+		viaServer.Serve(viaListener)
 	}()
 
-	log.Printf("starting proxy.Server at: %v", proxyListener.Addr().String())
-	go func() {
-		proxyServer.Serve(proxyListener)
-	}()
-
-	waitForGracefulShutdown(registerServer, proxyServer)
+	waitForGracefulShutdown(viaServer)
 }
 
-func waitForGracefulShutdown(registerServer, registerListener *grpc.Server) {
+func waitForGracefulShutdown(registerListener *grpc.Server) {
 	interruptChan := make(chan os.Signal, 1)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
@@ -103,7 +88,7 @@ func waitForGracefulShutdown(registerServer, registerListener *grpc.Server) {
 
 	_, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-	registerServer.GracefulStop()
+
 	registerListener.GracefulStop()
 
 	log.Println("Shutting down Via server.")

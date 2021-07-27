@@ -20,11 +20,11 @@ import (
 )
 
 var (
-	address          string
-	registerAddress  string
-	destProxyAddress string
-	partner          string
-	commands         map[string]Command
+	address  string
+	localVia string
+	destVia  string
+	partner  string
+	commands map[string]Command
 )
 
 // A Command is the API for a sub-command
@@ -35,9 +35,9 @@ const DefaultPartyId string = "testPartyId"
 
 func init() {
 	flag.StringVar(&partner, "partner", "partner_1", "partner")
-	flag.StringVar(&address, "address", ":10040", "listen address")
-	flag.StringVar(&registerAddress, "registerAddress", ":10030", "register address")
-	flag.StringVar(&destProxyAddress, "destProxyAddress", ":20031", "dest proxy address")
+	flag.StringVar(&address, "address", ":10040", "Math server listen address")
+	flag.StringVar(&localVia, "localVia", ":10031", "local VIA address")
+	flag.StringVar(&destVia, "destVia", ":20031", "dest VIA address")
 	flag.Parse()
 
 	commands = map[string]Command{
@@ -58,8 +58,8 @@ func (s *mathServer) init() {
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataTaskIdKey, DefaultTaskId)
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataPartyIdKey, DefaultPartyId)
 	s.ctx = ctx
-	if conn, err := grpc.Dial(destProxyAddress, grpc.WithInsecure()); err != nil {
-		log.Fatalf("did not connect to dest proxy: %v", err)
+	if conn, err := grpc.Dial(destVia, grpc.WithInsecure()); err != nil {
+		log.Fatalf("did not connect to dest VIA server: %v", err)
 	} else {
 		s.client = test.NewMathServiceClient(conn)
 	}
@@ -71,7 +71,7 @@ func (s *mathServer) Sum_Unary(ctx context.Context, metricList *test.MetricList)
 	for _, metric := range metricList.Metric {
 		sum += metric
 	}
-	log.Printf("计算服务结束(unary)：求列表之和：sum%v=%d", metricList, sum)
+	log.Printf("计算服务结束(unary)：求列表之和：%v sum=%d", metricList, sum)
 	return &test.SumResponse{Count: int32(len(metricList.Metric)), Val: sum}, nil
 }
 
@@ -136,14 +136,14 @@ func (s *mathServer) Sum_BidiStreaming(stream test.MathService_Sum_BidiStreaming
 }
 
 func registerTask() error {
-	log.Printf("dial to local register server on %v", registerAddress)
-	conn, err := grpc.Dial(registerAddress, grpc.WithInsecure())
+	log.Printf("dial to local VIA server on %v", localVia)
+	conn, err := grpc.Dial(localVia, grpc.WithInsecure())
 	if err != nil {
 		log.Fatalf("did not connect to local register server: %v", err)
 	}
 	defer conn.Close()
 
-	log.Printf("register task to local register server %v", registerAddress)
+	log.Printf("register task to local VIA server %v", localVia)
 
 	c := register.NewRegisterServiceClient(conn)
 

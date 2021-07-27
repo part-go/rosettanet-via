@@ -42,7 +42,7 @@ const MetadataPartyIdKey = "party_id"
 func GetDirector() StreamDirector {
 	director := func(ctx context.Context, fullName string) (context.Context, *grpc.ClientConn, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
-		log.Printf("收到的metadata.md: %v", md)
+		log.Printf("收到的metadata: %v", md)
 		if ok {
 			if taskId, exists := md[MetadataTaskIdKey]; exists {
 				if partyId, exists := md[MetadataPartyIdKey]; exists {
