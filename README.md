@@ -2,9 +2,9 @@
 
 VIA服务，既提供注册服务，以便本地task服务注册任务信息；也为远程task服务提供代理服务，以便访问本地task服务。
 
-因此，在本地task服务进程启动时，首先需要到VIA注册task服务的taskId/partyId/serviceType/address等信息。
+因此，在本地的**每一个参与方**的task服务进程启动时，首先需要到VIA注册task服务的taskId/partyId/serviceType/address等信息。
 
-本地task服务进程需要访问远程task服务进程的grpc接口时，接口地址需要指向远程VIA服务，同时在本次调用的metadata中，携带本次任务的taskId,以及远程task服务进程的的partyId。
+本地task服务进程需要访问远程task的某个参与方时，是直接访问远程VIA服务，同时在metadata中，携带任务的taskId,以及远程task服务的参与方的partyId。
 相应的metadata key定义为：
 ```
 MetadataTaskIdKey = "task_id"
