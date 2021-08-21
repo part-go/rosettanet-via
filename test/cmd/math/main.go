@@ -2,16 +2,21 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"io"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"net"
+	"via/conf"
 	"via/proxy"
 
 	"time"
@@ -24,6 +29,7 @@ var (
 	localVia string
 	destVia  string
 	partner  string
+	tlsFile  string
 	commands map[string]Command
 )
 
@@ -36,8 +42,9 @@ const DefaultPartyId string = "testPartyId"
 func init() {
 	flag.StringVar(&partner, "partner", "partner_1", "partner")
 	flag.StringVar(&address, "address", ":10040", "Math server listen address")
-	flag.StringVar(&localVia, "localVia", ":10031", "local VIA address")
-	flag.StringVar(&destVia, "destVia", ":20031", "dest VIA address")
+	flag.StringVar(&localVia, "localViaRegAddr", ":10031", "local VIA register address")
+	flag.StringVar(&destVia, "destViaProxyAddr", ":20031", "dest VIA proxy address")
+	flag.StringVar(&tlsFile, "tls", "./conf/tls.yml", "TLS config file")
 	flag.Parse()
 
 	commands = map[string]Command{
@@ -53,15 +60,26 @@ type mathServer struct {
 	client test.MathServiceClient
 }
 
-func (s *mathServer) init() {
+func (s *mathServer) dialRemoteVIA() {
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataTaskIdKey, DefaultTaskId)
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataPartyIdKey, DefaultPartyId)
 	s.ctx = ctx
-	if conn, err := grpc.Dial(destVia, grpc.WithInsecure()); err != nil {
-		log.Fatalf("did not connect to dest VIA server: %v", err)
+
+	if tlsCredentialsAsClient == nil {
+		if conn, err := grpc.Dial(destVia, grpc.WithInsecure()); err != nil {
+			log.Fatalf("did not connect to dest VIA server: %v", err)
+		} else {
+			log.Printf("Success to connect to dest VIA server with insecure: %v", destVia)
+			s.client = test.NewMathServiceClient(conn)
+		}
 	} else {
-		s.client = test.NewMathServiceClient(conn)
+		if conn, err := grpc.Dial(destVia, grpc.WithTransportCredentials(tlsCredentialsAsClient)); err != nil {
+			log.Fatalf("did not connect to dest VIA server: %v", err)
+		} else {
+			log.Printf("Success to connect to dest VIA server with secure: %v", destVia)
+			s.client = test.NewMathServiceClient(conn)
+		}
 	}
 }
 
@@ -137,7 +155,10 @@ func (s *mathServer) Sum_BidiStreaming(stream test.MathService_Sum_BidiStreaming
 
 func registerTask() error {
 	log.Printf("dial to local VIA server on %v", localVia)
+	//non-ssl connection for local VIA
 	conn, err := grpc.Dial(localVia, grpc.WithInsecure())
+	//conn, err := grpc.Dial(destVia, grpc.WithTransportCredentials(tlsCredentials))
+
 	if err != nil {
 		log.Fatalf("did not connect to local register server: %v", err)
 	}
@@ -267,31 +288,42 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	var s *grpc.Server
-
-	log.Print("running insecure!")
-	s = grpc.NewServer()
+	var grpcServer *grpc.Server
+	grpcServer = grpc.NewServer()
+	if tlsCredentialsAsServer == nil {
+		log.Print("running math server with insecure!")
+		grpcServer = grpc.NewServer()
+	} else {
+		log.Print("running math server with secure!")
+		grpcServer = grpc.NewServer(grpc.Creds(tlsCredentialsAsServer))
+	}
 
 	mathServ := &mathServer{}
-	mathServ.init()
 
-	// Register TASK API
-	test.RegisterMathServiceServer(s, mathServ)
-	reflection.Register(s)
+	mathServ.dialRemoteVIA()
+
+	// Register a non-ssl server for local VIA
+	test.RegisterMathServiceServer(grpcServer, mathServ)
+	reflection.Register(grpcServer)
 
 	log.Printf("Listening on %v", address)
 	go func() {
-		if err := s.Serve(lis); err != nil {
+		if err := grpcServer.Serve(lis); err != nil {
 			log.Fatalf("failed to serve: %v", err)
 		}
 	}()
 
+	// Register TASK
 	if err := registerTask(); err != nil {
 		log.Fatalf("failed to register task to local register server: %v", err)
 	}
 
 	//等待所有的任务都注册完成
 	time.Sleep(time.Duration(5) * time.Second)
+
+	//todo:
+	// Register another ssl server for local VIA
+
 	var cmdLine string
 
 	for {
@@ -310,4 +342,75 @@ func main() {
 			}
 		}
 	}
+}
+
+var tlsCredentialsAsClient credentials.TransportCredentials
+var tlsCredentialsAsServer credentials.TransportCredentials
+var tlsConfig *conf.TlsConfig
+
+func init() {
+	tlsConfig = conf.LoadTlsConfig(tlsFile)
+
+	log.Printf("配置文件中，tlsConfig.Tls.Secure=%s", tlsConfig.Tls.Secure)
+	if tlsConfig.Tls.Secure == "none" {
+		return
+	}
+
+	// Load io's certificate and private key
+	ioCert, err := tls.LoadX509KeyPair(tlsConfig.Tls.IoCertFile, tlsConfig.Tls.IoKeyFile)
+	if err != nil {
+		panic(fmt.Errorf("failed to load VIA certificate and private key. %v", err))
+	}
+
+	//当是SSL，拨号VIA需要携带统一的ca证书库
+	caPool := loadCaPool()
+
+	if tlsConfig.Tls.Secure == "one_way" {
+		// VIA单向ssl，VIA接收的是ssl流，转给node时，node也必须是ssl的，因此，此时node需要以ssl监听
+		// 加载io自己的证书，无需ca证书库（此时和VIA单向ssl的tls.config一样）
+		log.Printf("VIA单向SSL")
+		serverSSLConfig := &tls.Config{
+			Certificates: []tls.Certificate{ioCert},
+			ClientAuth:   tls.NoClientCert,
+		}
+		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
+
+		clientSSLConfig := &tls.Config{
+			RootCAs: caPool,
+		}
+		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
+
+	} else if tlsConfig.Tls.Secure == "two_way" {
+		// VIA双向ssl
+		// 加载io自己的证书，以及ca证书库
+		log.Printf("VIA双向SSL")
+		serverSSLConfig := &tls.Config{
+			Certificates: []tls.Certificate{ioCert},
+			ClientAuth:   tls.RequireAndVerifyClientCert,
+			ClientCAs:    caPool,
+		}
+		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
+
+		clientSSLConfig := &tls.Config{
+			Certificates: []tls.Certificate{ioCert},
+			RootCAs:      caPool,
+		}
+		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
+
+	}
+}
+
+func loadCaPool() *x509.CertPool {
+	// Load certificate of the CA who signed server's certificate
+	pemServerCA, err := ioutil.ReadFile("cert/ca-cert.pem")
+	if err != nil {
+		log.Fatalf("failed to read CA cert file. %v", err)
+	}
+
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(pemServerCA) {
+		log.Fatalf("failed to add CA cert to cert pool. %v", err)
+	}
+
+	return caPool
 }

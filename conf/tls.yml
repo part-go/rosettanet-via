@@ -1,0 +1,15 @@
+tls:
+  #ssl options: none, one_way, two_way
+  secure: two_way
+
+  viaCertFile: cert/server-cert.pem
+  viaKeyFile: cert/server-key.pem
+
+  ioCertFile: cert/client-cert.pem
+  ioKeyFile: cert/client-key.pem
+
+  caCertFile: cert/ca-cert.pem
+
+
+
+

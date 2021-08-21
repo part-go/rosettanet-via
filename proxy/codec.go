@@ -50,7 +50,7 @@ func (c *rawCodec) Marshal(v interface{}) ([]byte, error) {
 		return c.parentCodec.Marshal(v)
 	}
 	//否则，则认为是需要转发的数据流，把可rawCodec.Unmarshal读出的数据直接返回即可
-	log.Printf("rawCodec.Marshal: just forward stream(out):%v", out.payload)
+	//log.Printf("rawCodec.Marshal: just forward stream(out):%v", out.payload)
 	return out.payload, nil
 
 }
@@ -65,7 +65,7 @@ func (c *rawCodec) Unmarshal(data []byte, v interface{}) error {
 		return c.parentCodec.Unmarshal(data, v)
 	}
 	//否则，则认为是需要转发的数据流，读出数据即可
-	log.Printf("rawCodec.Unmarshal: just forward stream(in):%v", data)
+	//log.Printf("rawCodec.Unmarshal: just forward stream(in):%v", data)
 	dst.payload = data
 	return nil
 }
