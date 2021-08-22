@@ -21,31 +21,47 @@ protoc --go_out=plugins=grpc:. register/proto/*.proto
 protoc --go_out=plugins=grpc:. test/proto/*.proto
 ```
 
-#### VIA源码的启动方式：
+#### VIA源码的启动方式
+
+- SSL方式：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -regAddr 0.0.0.0:10031 -proxyAddr 0.0.0.0:10032
+go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:10031
 ```
+
 其中
-tls:
+
+- tls:
 tls配置文件，配置VIA代理服务要求的安全模式（SSL模式），以及SSL模式时需要的各种证书。
 
-regAddr：
-表示VIA的任务注册服务地址（此服务是非SSL的）。
+- address：
+表示VIA服务的监听地址
 
-proxyAddr：
-表示VIA的代理服务地址，此服务根据tls配置，决定是否是SSL，或更进一步是否是双向SSL
+
+- 非SSL方式：
+```
+go run ./cmd/via/main.go -address 0.0.0.0:10031
+```
+其中
+
+- address：
+表示VIA服务的监听地址
+
+**注意事项**
+
+- 所有 VIA 的安全模式必须一致
+- task 服务实例的安全模式必须和 VIA 保持一致
+- 当 VIA 的安全模式是SSL时，VIA、task服务实例所用的证书，必须是证书链中的某一个相同的机构签发。
+
 
 #### 演示方法：
 
 1. 启动一个VIA服务：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -regAddr 0.0.0.0:10031 -proxyAddr 0.0.0.0:10032
+go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:10031
 ```
 2. 启动这个VIA服务后面的task服务：
 ```
-go run ./test/cmd/math/main.go -tls conf/tls.yml -partner partner_1 -address 0.0.0.0:10040 -localViaRegAddr 0.0.0
-.0:10031 -destViaProxyAddr 0.0.0.0:20032
-
+go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:20031
 ```
 3. 启动另一个VIA服务：
 ```
@@ -53,11 +69,10 @@ go run ./cmd/via/main.go -tls conf/tls.yml -regAddr 0.0.0.0:20031 -proxyAddr 0.0
 ```
 4. 启动这个VIA服务后面的task服务：
 ```
-go run ./test/cmd/math/main.go -tls conf/tls.yml -partner partner_2 -address 0.0.0.0:20040 -localViaRegAddr 0.0.0
-.0:20031 -destViaProxyAddr 0.0.0.0:10032
+go run ./test/cmd/math/main.go -tls conf/tls.yml -partner partner_2 -address 0.0.0.0:20040 -localVia 0.0.0.0:20031 -destVia 0.0.0.0:10031
 ```
 
-在两个启动的task服务的控制台，按提示输入命令，即可演示各种模式grpc。
+在两个启动的task服务的控制台，按提示输入命令，即可演示各种模式grpc调用。
 
 命令行提示：
 

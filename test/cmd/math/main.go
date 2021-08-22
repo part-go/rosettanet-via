@@ -25,12 +25,13 @@ import (
 )
 
 var (
-	address  string
-	localVia string
-	destVia  string
-	partner  string
-	tlsFile  string
-	commands map[string]Command
+	address    string
+	localVia   string
+	destVia    string
+	partner    string
+	tlsFile    string
+	tlsEnabled = false
+	commands   map[string]Command
 )
 
 // A Command is the API for a sub-command
@@ -42,11 +43,14 @@ const DefaultPartyId string = "testPartyId"
 func init() {
 	flag.StringVar(&partner, "partner", "partner_1", "partner")
 	flag.StringVar(&address, "address", ":10040", "Math server listen address")
-	flag.StringVar(&localVia, "localViaRegAddr", ":10031", "local VIA register address")
-	flag.StringVar(&destVia, "destViaProxyAddr", ":20031", "dest VIA proxy address")
-	flag.StringVar(&tlsFile, "tls", "./conf/tls.yml", "TLS config file")
+	flag.StringVar(&localVia, "localVia", ":10031", "local VIA address")
+	flag.StringVar(&destVia, "destVia", ":20031", "dest VIA address")
+	flag.StringVar(&tlsFile, "tls", "", "TLS config file")
 	flag.Parse()
 
+	if len(tlsFile) > 0 {
+		tlsEnabled = true
+	}
 	commands = map[string]Command{
 		"unary":           unary,
 		"serverStreaming": serverStreaming,
@@ -60,24 +64,24 @@ type mathServer struct {
 	client test.MathServiceClient
 }
 
-func (s *mathServer) dialRemoteVIA() {
+func (s *mathServer) dialDestVIA() {
 	ctx := context.Background()
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataTaskIdKey, DefaultTaskId)
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataPartyIdKey, DefaultPartyId)
 	s.ctx = ctx
 
-	if tlsCredentialsAsClient == nil {
-		if conn, err := grpc.Dial(destVia, grpc.WithInsecure()); err != nil {
-			log.Fatalf("did not connect to dest VIA server: %v", err)
-		} else {
-			log.Printf("Success to connect to dest VIA server with insecure: %v", destVia)
-			s.client = test.NewMathServiceClient(conn)
-		}
-	} else {
+	if tlsEnabled {
 		if conn, err := grpc.Dial(destVia, grpc.WithTransportCredentials(tlsCredentialsAsClient)); err != nil {
 			log.Fatalf("did not connect to dest VIA server: %v", err)
 		} else {
 			log.Printf("Success to connect to dest VIA server with secure: %v", destVia)
+			s.client = test.NewMathServiceClient(conn)
+		}
+	} else {
+		if conn, err := grpc.Dial(destVia, grpc.WithInsecure()); err != nil {
+			log.Fatalf("did not connect to dest VIA server: %v", err)
+		} else {
+			log.Printf("Success to connect to dest VIA server with insecure: %v", destVia)
 			s.client = test.NewMathServiceClient(conn)
 		}
 	}
@@ -155,9 +159,15 @@ func (s *mathServer) Sum_BidiStreaming(stream test.MathService_Sum_BidiStreaming
 
 func registerTask() error {
 	log.Printf("dial to local VIA server on %v", localVia)
-	//non-ssl connection for local VIA
-	conn, err := grpc.Dial(localVia, grpc.WithInsecure())
-	//conn, err := grpc.Dial(destVia, grpc.WithTransportCredentials(tlsCredentials))
+
+	var conn *grpc.ClientConn
+	var err error
+
+	if tlsCredentialsAsClient == nil {
+		conn, err = grpc.Dial(localVia, grpc.WithInsecure())
+	} else {
+		conn, err = grpc.Dial(localVia, grpc.WithTransportCredentials(tlsCredentialsAsClient))
+	}
 
 	if err != nil {
 		log.Fatalf("did not connect to local register server: %v", err)
@@ -290,17 +300,17 @@ func main() {
 
 	var grpcServer *grpc.Server
 	grpcServer = grpc.NewServer()
-	if tlsCredentialsAsServer == nil {
-		log.Print("running math server with insecure!")
-		grpcServer = grpc.NewServer()
-	} else {
+	if tlsEnabled {
 		log.Print("running math server with secure!")
 		grpcServer = grpc.NewServer(grpc.Creds(tlsCredentialsAsServer))
+	} else {
+		log.Print("running math server with insecure!")
+		grpcServer = grpc.NewServer()
 	}
 
 	mathServ := &mathServer{}
 
-	mathServ.dialRemoteVIA()
+	mathServ.dialDestVIA()
 
 	// Register a non-ssl server for local VIA
 	test.RegisterMathServiceServer(grpcServer, mathServ)
@@ -320,9 +330,6 @@ func main() {
 
 	//等待所有的任务都注册完成
 	time.Sleep(time.Duration(5) * time.Second)
-
-	//todo:
-	// Register another ssl server for local VIA
 
 	var cmdLine string
 
@@ -349,23 +356,24 @@ var tlsCredentialsAsServer credentials.TransportCredentials
 var tlsConfig *conf.TlsConfig
 
 func init() {
-	tlsConfig = conf.LoadTlsConfig(tlsFile)
 
-	log.Printf("配置文件中，tlsConfig.Tls.Secure=%s", tlsConfig.Tls.Secure)
-	if tlsConfig.Tls.Secure == "none" {
+	if !tlsEnabled {
 		return
 	}
+	tlsConfig = conf.LoadTlsConfig(tlsFile)
+
+	log.Printf("配置文件中，tlsConfig.Tls.Mode=%s", tlsConfig.Tls.Mode)
 
 	// Load io's certificate and private key
 	ioCert, err := tls.LoadX509KeyPair(tlsConfig.Tls.IoCertFile, tlsConfig.Tls.IoKeyFile)
 	if err != nil {
-		panic(fmt.Errorf("failed to load VIA certificate and private key. %v", err))
+		log.Fatalf("failed to load VIA certificate and private key. %v", err)
 	}
 
 	//当是SSL，拨号VIA需要携带统一的ca证书库
 	caPool := loadCaPool()
 
-	if tlsConfig.Tls.Secure == "one_way" {
+	if tlsConfig.Tls.Mode == "one_way" {
 		// VIA单向ssl，VIA接收的是ssl流，转给node时，node也必须是ssl的，因此，此时node需要以ssl监听
 		// 加载io自己的证书，无需ca证书库（此时和VIA单向ssl的tls.config一样）
 		log.Printf("VIA单向SSL")
@@ -380,7 +388,7 @@ func init() {
 		}
 		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
 
-	} else if tlsConfig.Tls.Secure == "two_way" {
+	} else if tlsConfig.Tls.Mode == "two_way" {
 		// VIA双向ssl
 		// 加载io自己的证书，以及ca证书库
 		log.Printf("VIA双向SSL")
@@ -396,7 +404,8 @@ func init() {
 			RootCAs:      caPool,
 		}
 		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-
+	} else {
+		log.Fatalf("Tls.Mode value error: %s", tlsConfig.Tls.Mode)
 	}
 }
 

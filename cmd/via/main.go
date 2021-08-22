@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"flag"
-	"fmt"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -23,25 +22,28 @@ import (
 )
 
 var (
-	regAddr   string
-	proxyAddr string
-	tlsFile   string
+	address    string
+	tlsFile    string
+	tlsEnabled = false
 )
 
 func init() {
-	flag.StringVar(&regAddr, "regAddr", ":10031", "VIA register service listen address")
-	flag.StringVar(&proxyAddr, "proxyAddr", ":10032", "VIA proxy service listen address")
-	flag.StringVar(&tlsFile, "tls", "../conf/tls.yml", "TLS config file")
+	flag.StringVar(&address, "address", ":10031", "VIA service listen address")
+	flag.StringVar(&tlsFile, "tls", "", "TLS config file")
 	flag.Parse()
+
+	if len(tlsFile) > 0 {
+		tlsEnabled = true
+	}
 }
 
-type RegisterServer struct{}
+type VIAServer struct{}
 
-func NewRegisterServer() *RegisterServer {
-	return &RegisterServer{}
+func NewVIAServer() *VIAServer {
+	return &VIAServer{}
 }
 
-func (t *RegisterServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
+func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
 
 	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
 
@@ -53,12 +55,12 @@ func (t *RegisterServer) Register(ctx context.Context, req *register.RegisterReq
 
 		var conn *grpc.ClientConn
 		var err error
-		if tlsCredentialsAsClient == nil {
-			log.Printf("回拨local task server with insecure, %s", registeredTask.Address)
-			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
-		} else {
+		if tlsEnabled {
 			log.Printf("回拨local task server with secure, %s", registeredTask.Address)
 			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithTransportCredentials(tlsCredentialsAsClient))
+		} else {
+			log.Printf("回拨local task server with insecure, %s", registeredTask.Address)
+			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
 		}
 
 		if err != nil {
@@ -79,66 +81,42 @@ func (t *RegisterServer) Register(ctx context.Context, req *register.RegisterReq
 	}
 }
 
-//启动任务注册服务，调用任务注册服务无需TLS/SSL
-func startRegisterWithNoTls() *grpc.Server {
-	//via提供的任务注册服务
-	registerListener, err := net.Listen("tcp", regAddr)
-	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
-	}
-
-	registerServer := grpc.NewServer()
-	//注册本身提供的任务注册服务
-	register.RegisterRegisterServiceServer(registerServer, NewRegisterServer())
-
-	go func() {
-		log.Printf("starting VIA register.Server at: %v", regAddr)
-		registerServer.Serve(registerListener)
-	}()
-
-	return registerServer
-}
-
-func startProxy() *grpc.Server {
+func main() {
 	//via提供的代理服务
-	proxyListener, err := net.Listen("tcp", proxyAddr)
+	viaListener, err := net.Listen("tcp", address)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	/*tlsCredentials, err := loadTLSCredentials()
-	if err != nil {
-		log.Fatal("cannot load TLS credentials: ", err)
-	}*/
-	var proxyServer *grpc.Server
-	if tlsCredentialsAsServer == nil {
+	var viaServer *grpc.Server
+	if tlsEnabled {
+		log.Printf("starting VIA Server with secure at: %s", address)
 		//把所有服务都作为非注册服务，通过TransparentHandler来处理
-		proxyServer = grpc.NewServer(
+		viaServer = grpc.NewServer(
 			grpc.Creds(tlsCredentialsAsServer),
 			grpc.ForceServerCodec(proxy.Codec()),
 			grpc.UnknownServiceHandler(proxy.TransparentHandler(proxy.GetDirector())),
 		)
 	} else {
+		log.Printf("starting VIA Server with insecure at: %s", address)
 		//把所有服务都作为非注册服务，通过TransparentHandler来处理
-		proxyServer = grpc.NewServer(
-			grpc.Creds(tlsCredentialsAsServer),
+		viaServer = grpc.NewServer(
 			grpc.ForceServerCodec(proxy.Codec()),
 			grpc.UnknownServiceHandler(proxy.TransparentHandler(proxy.GetDirector())),
 		)
 	}
 
+	//注册本身提供的服务
+	register.RegisterRegisterServiceServer(viaServer, NewVIAServer())
+
 	go func() {
-		log.Printf("starting VIA proxy.Server at: %v", proxyAddr)
-		proxyServer.Serve(proxyListener)
+		viaServer.Serve(viaListener)
 	}()
 
-	return proxyServer
-}
-func main() {
-	waitForGracefulShutdown(startRegisterWithNoTls(), startProxy())
+	waitForGracefulShutdown(viaServer)
 }
 
-func waitForGracefulShutdown(registerServer, proxyServer *grpc.Server) {
+func waitForGracefulShutdown(viaServer *grpc.Server) {
 	interruptChan := make(chan os.Signal, 1)
 	signal.Notify(interruptChan, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
@@ -146,8 +124,7 @@ func waitForGracefulShutdown(registerServer, proxyServer *grpc.Server) {
 
 	_, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-	registerServer.GracefulStop()
-	proxyServer.GracefulStop()
+	viaServer.GracefulStop()
 
 	log.Println("Shutting down VIA server.")
 	os.Exit(0)
@@ -158,21 +135,21 @@ var tlsCredentialsAsServer credentials.TransportCredentials
 var tlsConfig *conf.TlsConfig
 
 func init() {
-	tlsConfig = conf.LoadTlsConfig(tlsFile)
-
-	if tlsConfig.Tls.Secure == "none" {
+	if !tlsEnabled {
 		return
 	}
+
+	tlsConfig = conf.LoadTlsConfig(tlsFile)
 
 	// Load via's certificate and private key
 	viaCert, err := tls.LoadX509KeyPair(tlsConfig.Tls.ViaCertFile, tlsConfig.Tls.ViaKeyFile)
 	if err != nil {
-		panic(fmt.Errorf("failed to load VIA certificate and private key. %v", err))
+		log.Fatalf("failed to load VIA certificate and private key. %v", err)
 	}
 	//当是SSL，拨号VIA需要携带统一的ca证书库
 	caPool := loadCaPool()
 
-	if tlsConfig.Tls.Secure == "one_way" {
+	if tlsConfig.Tls.Mode == "one_way" {
 		log.Printf("VIA单向SSL")
 		serverSSLConfig := &tls.Config{
 			Certificates: []tls.Certificate{viaCert},
@@ -184,7 +161,7 @@ func init() {
 			RootCAs: caPool,
 		}
 		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-	} else if tlsConfig.Tls.Secure == "two_way" {
+	} else if tlsConfig.Tls.Mode == "two_way" {
 		log.Printf("VIA双向SSL")
 		serverSSLConfig := &tls.Config{
 			//InsecureSkipVerify: true, //不校验证书有效性
@@ -199,6 +176,8 @@ func init() {
 			RootCAs:      caPool,
 		}
 		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
+	} else {
+		log.Fatalf("Tls.Mode value error: %s", tlsConfig.Tls.Mode)
 	}
 }
 

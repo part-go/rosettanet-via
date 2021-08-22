@@ -11,7 +11,7 @@ type TlsConfig struct {
 }
 
 type Tls struct {
-	Secure      string `yaml:"secure"`
+	Mode        string `yaml:"mode"`
 	ViaCertFile string `yaml:"viaCertFile"`
 	ViaKeyFile  string `yaml:"viaKeyFile"`
 	IoCertFile  string `yaml:"ioCertFile"`

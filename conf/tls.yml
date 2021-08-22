@@ -1,6 +1,6 @@
 tls:
-  #ssl options: none, one_way, two_way
-  secure: two_way
+  #tls mode options: one_way, two_way
+  mode: one_way
 
   viaCertFile: cert/server-cert.pem
   viaKeyFile: cert/server-key.pem
