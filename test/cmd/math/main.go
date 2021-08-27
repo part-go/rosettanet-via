@@ -18,8 +18,8 @@ import (
 	"via/proxy"
 
 	"time"
-	"via/register"
 	"via/test"
+	"via/via"
 )
 
 var (
@@ -155,7 +155,7 @@ func (s *mathServer) Sum_BidiStreaming(stream test.MathService_Sum_BidiStreaming
 	}
 }
 
-func registerTask() error {
+func signupTask() error {
 	log.Printf("dial to local VIA server on %v", localVia)
 
 	var conn *grpc.ClientConn
@@ -170,23 +170,23 @@ func registerTask() error {
 	}
 
 	if err != nil {
-		log.Fatalf("did not connect to local register server: %v", err)
+		log.Fatalf("did not connect to local VIA server: %v", err)
 	}
 	defer conn.Close()
 
-	log.Printf("register task to local VIA server %v", localVia)
+	log.Printf("signup task to local VIA server %v", localVia)
 
-	c := register.NewRegisterServiceClient(conn)
+	c := via.NewVIAServiceClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	r, err := c.Register(ctx, &register.RegisterReq{TaskId: DefaultTaskId, PartyId: DefaultPartyId, Address: address})
+	r, err := c.Signup(ctx, &via.SignupReq{TaskId: DefaultTaskId, PartyId: DefaultPartyId, Address: address})
 	if err != nil {
 		return err
 	}
 
-	log.Printf("Register task result: %v", r.Result)
+	log.Printf("Signup task result: %v", r.Result)
 	return nil
 }
 
@@ -323,9 +323,9 @@ func main() {
 		}
 	}()
 
-	// Register TASK
-	if err := registerTask(); err != nil {
-		log.Fatalf("failed to register task to local register server: %v", err)
+	// Signup TASK
+	if err := signupTask(); err != nil {
+		log.Fatalf("failed to signup task to local VIA server: %v", err)
 	}
 
 	//等待所有的任务都注册完成

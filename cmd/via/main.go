@@ -16,7 +16,7 @@ import (
 	"via/conf"
 	"via/creds"
 	"via/proxy"
-	"via/register"
+	"via/via"
 )
 
 var (
@@ -35,15 +35,15 @@ func init() {
 	}
 }
 
-type VIAServer struct{}
+type viaServer struct{}
 
-func NewVIAServer() *VIAServer {
-	return &VIAServer{}
+func newVIAServer() *viaServer {
+	return &viaServer{}
 }
 
-func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
+func (t *viaServer) Signup(ctx context.Context, req *via.SignupReq) (*via.Boolean, error) {
 
-	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
+	registeredTask := &proxy.SignupTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
 
 	log.Printf("收到注册请求：%v", req)
 
@@ -63,7 +63,7 @@ func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*r
 
 		if err != nil {
 			log.Printf("回拨local task server失败")
-			return &register.Boolean{Result: false}, err
+			return &via.Boolean{Result: false}, err
 		}
 
 		//用taskId_partyId作为请求者的唯一标识，把conn保存到map中。
@@ -72,10 +72,10 @@ func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*r
 
 		log.Printf("回拨local task server成功")
 
-		return &register.Boolean{Result: true}, nil
+		return &via.Boolean{Result: true}, nil
 	} else {
 		log.Printf("获取local task server节点信息失败")
-		return &register.Boolean{Result: false}, errors.New("failed to retrieve the task server peer info")
+		return &via.Boolean{Result: false}, errors.New("failed to retrieve the task server peer info")
 	}
 }
 
@@ -107,7 +107,7 @@ func main() {
 	}
 
 	//注册本身提供的服务
-	register.RegisterRegisterServiceServer(viaServer, NewVIAServer())
+	via.RegisterVIAServiceServer(viaServer, newVIAServer())
 
 	go func() {
 		viaServer.Serve(viaListener)

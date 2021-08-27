@@ -25,7 +25,7 @@ import (
 type StreamDirector func(ctx context.Context, fullMethodName string) (context.Context, *grpc.ClientConn, error)
 
 //任务的服务信息
-type RegisteredTask struct {
+type SignupTask struct {
 	TaskId      string           //任务id
 	PartyId     string           //任务参与方唯一id
 	ServiceType string           //任务服务类型
@@ -34,7 +34,7 @@ type RegisteredTask struct {
 }
 
 // 存放注册的任务服务进程信息
-var RegisteredTaskMap = make(map[string]*RegisteredTask)
+var RegisteredTaskMap = make(map[string]*SignupTask)
 
 const MetadataTaskIdKey = "task_id"
 const MetadataPartyIdKey = "party_id"
