@@ -1,8 +1,5 @@
 .idea
 dist/
-*.crt
 *.csr
-*.key
 *.pb.go
-*.pem
 *.srl
