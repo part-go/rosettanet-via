@@ -1,15 +1,12 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"flag"
+	"github.com/bglmmz/grpc"
+	"github.com/bglmmz/grpc/credentials"
+	"github.com/bglmmz/grpc/peer"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -17,23 +14,24 @@ import (
 	"syscall"
 	"time"
 	"via/conf"
+	"via/creds"
 	"via/proxy"
 	"via/register"
 )
 
 var (
 	address    string
-	tlsFile    string
-	tlsEnabled = false
+	sslFile    string
+	sslEnabled = false
 )
 
 func init() {
 	flag.StringVar(&address, "address", ":10031", "VIA service listen address")
-	flag.StringVar(&tlsFile, "tls", "", "TLS config file")
+	flag.StringVar(&sslFile, "ssl", "", "SSL config file")
 	flag.Parse()
 
-	if len(tlsFile) > 0 {
-		tlsEnabled = true
+	if len(sslFile) > 0 {
+		sslEnabled = true
 	}
 }
 
@@ -55,12 +53,12 @@ func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*r
 
 		var conn *grpc.ClientConn
 		var err error
-		if tlsEnabled {
+		if sslEnabled {
 			log.Printf("回拨local task server with secure, %s", registeredTask.Address)
-			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithTransportCredentials(tlsCredentialsAsClient))
+			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithCodec(proxy.Codec()), grpc.WithTransportCredentials(tlsCredentialsAsClient))
 		} else {
 			log.Printf("回拨local task server with insecure, %s", registeredTask.Address)
-			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
+			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithCodec(proxy.Codec()), grpc.WithInsecure())
 		}
 
 		if err != nil {
@@ -89,21 +87,23 @@ func main() {
 	}
 
 	var viaServer *grpc.Server
-	if tlsEnabled {
+	if sslEnabled {
 		log.Printf("starting VIA Server with secure at: %s", address)
 		//把所有服务都作为非注册服务，通过TransparentHandler来处理
 		viaServer = grpc.NewServer(
 			grpc.Creds(tlsCredentialsAsServer),
-			grpc.ForceServerCodec(proxy.Codec()),
+			grpc.CustomCodec(proxy.Codec()),
 			grpc.UnknownServiceHandler(proxy.TransparentHandler(proxy.GetDirector())),
 		)
+		//encoding.RegisterCodec(proxy.Codec())
 	} else {
 		log.Printf("starting VIA Server with insecure at: %s", address)
 		//把所有服务都作为非注册服务，通过TransparentHandler来处理
 		viaServer = grpc.NewServer(
-			grpc.ForceServerCodec(proxy.Codec()),
+			grpc.CustomCodec(proxy.Codec()),
 			grpc.UnknownServiceHandler(proxy.TransparentHandler(proxy.GetDirector())),
 		)
+		//encoding.RegisterCodec(proxy.Codec())
 	}
 
 	//注册本身提供的服务
@@ -130,68 +130,82 @@ func waitForGracefulShutdown(viaServer *grpc.Server) {
 	os.Exit(0)
 }
 
-var tlsCredentialsAsClient credentials.TransportCredentials
+var sslConfig *conf.Config
 var tlsCredentialsAsServer credentials.TransportCredentials
-var tlsConfig *conf.TlsConfig
+var tlsCredentialsAsClient credentials.TransportCredentials
 
 func init() {
-	if !tlsEnabled {
+	if !sslEnabled {
 		return
 	}
+	sslConfig = conf.LoadSSLConfig(sslFile)
 
-	tlsConfig = conf.LoadTlsConfig(tlsFile)
-
-	// Load via's certificate and private key
-	viaCert, err := tls.LoadX509KeyPair(tlsConfig.Tls.ViaCertFile, tlsConfig.Tls.ViaKeyFile)
-	if err != nil {
-		log.Fatalf("failed to load VIA certificate and private key. %v", err)
-	}
-	//当是SSL，拨号VIA需要携带统一的ca证书库
-	caPool := loadCaPool()
-
-	if tlsConfig.Tls.Mode == "one_way" {
-		log.Printf("VIA单向SSL")
-		serverSSLConfig := &tls.Config{
-			Certificates: []tls.Certificate{viaCert},
-			ClientAuth:   tls.NoClientCert,
-		}
-		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
-
-		clientSSLConfig := &tls.Config{
-			RootCAs: caPool,
-		}
-		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-	} else if tlsConfig.Tls.Mode == "two_way" {
-		log.Printf("VIA双向SSL")
-		serverSSLConfig := &tls.Config{
-			//InsecureSkipVerify: true, //不校验证书有效性
-			Certificates: []tls.Certificate{viaCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    loadCaPool(),
-		}
-		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
-
-		clientSSLConfig := &tls.Config{
-			Certificates: []tls.Certificate{viaCert},
-			RootCAs:      caPool,
-		}
-		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-	} else {
-		log.Fatalf("Tls.Mode value error: %s", tlsConfig.Tls.Mode)
-	}
+	createTlsCredentials()
 }
 
-func loadCaPool() *x509.CertPool {
-	// Load certificate of the CA who signed server's certificate
-	pemServerCA, err := ioutil.ReadFile("cert/ca-cert.pem")
-	if err != nil {
-		log.Fatalf("failed to read CA cert file. %v", err)
-	}
+func createTlsCredentials() {
+	var err error
+	if sslConfig.Conf.Cipher == "ssl" {
+		if sslConfig.Conf.Mode == "one_way" {
+			tlsCredentialsAsServer, err = creds.NewServerTLSOneWay(sslConfig.Conf.SSL.ViaCertFile, sslConfig.Conf.SSL.ViaKeyFile)
+			if err != nil {
+				panic(err)
+			}
+			tlsCredentialsAsClient, err = creds.NewClientTLSOneWay(sslConfig.Conf.SSL.CaCertFile)
+			if err != nil {
+				panic(err)
+			}
+		} else if sslConfig.Conf.Mode == "two_way" {
+			tlsCredentialsAsServer, err = creds.NewServerTLSTwoWay(sslConfig.Conf.SSL.CaCertFile, sslConfig.Conf.SSL.ViaCertFile, sslConfig.Conf.SSL.ViaKeyFile)
+			if err != nil {
+				panic(err)
+			}
+			tlsCredentialsAsClient, err = creds.NewClientTLSTwoWay(sslConfig.Conf.SSL.CaCertFile, sslConfig.Conf.SSL.ViaCertFile, sslConfig.Conf.SSL.ViaKeyFile)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			log.Fatalf("error mode in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+		}
+	} else if sslConfig.Conf.Cipher == "gmssl" {
+		if sslConfig.Conf.Mode == "one_way" {
+			tlsCredentialsAsServer, err = creds.NewServerGMTLSOneWay(
+				sslConfig.Conf.GMSSL.ViaSignCertFile, sslConfig.Conf.GMSSL.ViaSignKeyFile,
+				sslConfig.Conf.GMSSL.ViaEncryptCertFile, sslConfig.Conf.GMSSL.ViaEncryptKeyFile,
+			)
+			if err != nil {
+				panic(err)
+			}
 
-	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM(pemServerCA) {
-		log.Fatalf("failed to add CA cert to cert pool. %v", err)
-	}
+			tlsCredentialsAsClient, err = creds.NewClientGMTLSOneWay(sslConfig.Conf.GMSSL.CaCertFile)
+			if err != nil {
+				panic(err)
+			}
 
-	return caPool
+		} else if sslConfig.Conf.Mode == "two_way" {
+			tlsCredentialsAsServer, err = creds.NewServerGMTLSTwoWay(
+				sslConfig.Conf.GMSSL.CaCertFile,
+				sslConfig.Conf.GMSSL.ViaSignCertFile, sslConfig.Conf.GMSSL.ViaSignKeyFile,
+				sslConfig.Conf.GMSSL.ViaEncryptCertFile, sslConfig.Conf.GMSSL.ViaEncryptKeyFile,
+			)
+
+			if err != nil {
+				panic(err)
+			}
+
+			tlsCredentialsAsClient, err = creds.NewClientGMTLSTwoWay(
+				sslConfig.Conf.GMSSL.CaCertFile,
+				sslConfig.Conf.GMSSL.ViaSignCertFile, sslConfig.Conf.GMSSL.ViaSignKeyFile,
+				sslConfig.Conf.GMSSL.ViaEncryptCertFile, sslConfig.Conf.GMSSL.ViaEncryptKeyFile,
+			)
+			if err != nil {
+				panic(err)
+			}
+
+		} else {
+			log.Fatalf("error mode in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+		}
+	} else {
+		log.Fatalf("error cilper in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+	}
 }

@@ -2,21 +2,19 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
+	"github.com/bglmmz/grpc"
+	"github.com/bglmmz/grpc/credentials"
+	"github.com/bglmmz/grpc/metadata"
+	"github.com/bglmmz/grpc/reflection"
 	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/reflection"
 	"io"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net"
 	"via/conf"
+	"via/creds"
 	"via/proxy"
 
 	"time"
@@ -29,8 +27,8 @@ var (
 	localVia   string
 	destVia    string
 	partner    string
-	tlsFile    string
-	tlsEnabled = false
+	sslFile    string
+	sslEnabled = false
 	commands   map[string]Command
 )
 
@@ -45,11 +43,11 @@ func init() {
 	flag.StringVar(&address, "address", ":10040", "Math server listen address")
 	flag.StringVar(&localVia, "localVia", ":10031", "local VIA address")
 	flag.StringVar(&destVia, "destVia", ":20031", "dest VIA address")
-	flag.StringVar(&tlsFile, "tls", "", "TLS config file")
+	flag.StringVar(&sslFile, "ssl", "", "SSL config file")
 	flag.Parse()
 
-	if len(tlsFile) > 0 {
-		tlsEnabled = true
+	if len(sslFile) > 0 {
+		sslEnabled = true
 	}
 	commands = map[string]Command{
 		"unary":           unary,
@@ -70,7 +68,7 @@ func (s *mathServer) dialDestVIA() {
 	ctx = metadata.AppendToOutgoingContext(ctx, proxy.MetadataPartyIdKey, DefaultPartyId)
 	s.ctx = ctx
 
-	if tlsEnabled {
+	if sslEnabled {
 		if conn, err := grpc.Dial(destVia, grpc.WithTransportCredentials(tlsCredentialsAsClient)); err != nil {
 			log.Fatalf("did not connect to dest VIA server: %v", err)
 		} else {
@@ -163,10 +161,12 @@ func registerTask() error {
 	var conn *grpc.ClientConn
 	var err error
 
-	if tlsCredentialsAsClient == nil {
-		conn, err = grpc.Dial(localVia, grpc.WithInsecure())
-	} else {
+	if sslEnabled {
+		log.Printf("dail up to VIA with secure")
 		conn, err = grpc.Dial(localVia, grpc.WithTransportCredentials(tlsCredentialsAsClient))
+	} else {
+		log.Printf("dail up to VIA with insecure")
+		conn, err = grpc.Dial(localVia, grpc.WithInsecure())
 	}
 
 	if err != nil {
@@ -286,9 +286,9 @@ func bidi(s *mathServer) error {
 		log.Printf("接收到对方的计算的中间结果：count: %d, average: %d", resp.Count, resp.Val)
 		time.Sleep(time.Duration(100) * time.Millisecond)
 	}
-	if err := stream.CloseSend(); err != nil {
+	/*if err := stream.CloseSend(); err != nil {
 		log.Fatalf("结束向对方发送数字出错, %v", err)
-	}
+	}*/
 	return nil
 }
 
@@ -300,7 +300,7 @@ func main() {
 
 	var grpcServer *grpc.Server
 	grpcServer = grpc.NewServer()
-	if tlsEnabled {
+	if sslEnabled {
 		log.Print("running math server with secure!")
 		grpcServer = grpc.NewServer(grpc.Creds(tlsCredentialsAsServer))
 	} else {
@@ -351,75 +351,82 @@ func main() {
 	}
 }
 
-var tlsCredentialsAsClient credentials.TransportCredentials
+var sslConfig *conf.Config
 var tlsCredentialsAsServer credentials.TransportCredentials
-var tlsConfig *conf.TlsConfig
+var tlsCredentialsAsClient credentials.TransportCredentials
 
 func init() {
-
-	if !tlsEnabled {
+	if !sslEnabled {
 		return
 	}
-	tlsConfig = conf.LoadTlsConfig(tlsFile)
+	sslConfig = conf.LoadSSLConfig(sslFile)
 
-	log.Printf("配置文件中，tlsConfig.Tls.Mode=%s", tlsConfig.Tls.Mode)
-
-	// Load io's certificate and private key
-	ioCert, err := tls.LoadX509KeyPair(tlsConfig.Tls.IoCertFile, tlsConfig.Tls.IoKeyFile)
-	if err != nil {
-		log.Fatalf("failed to load VIA certificate and private key. %v", err)
-	}
-
-	//当是SSL，拨号VIA需要携带统一的ca证书库
-	caPool := loadCaPool()
-
-	if tlsConfig.Tls.Mode == "one_way" {
-		// VIA单向ssl，VIA接收的是ssl流，转给node时，node也必须是ssl的，因此，此时node需要以ssl监听
-		// 加载io自己的证书，无需ca证书库（此时和VIA单向ssl的tls.config一样）
-		log.Printf("VIA单向SSL")
-		serverSSLConfig := &tls.Config{
-			Certificates: []tls.Certificate{ioCert},
-			ClientAuth:   tls.NoClientCert,
-		}
-		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
-
-		clientSSLConfig := &tls.Config{
-			RootCAs: caPool,
-		}
-		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-
-	} else if tlsConfig.Tls.Mode == "two_way" {
-		// VIA双向ssl
-		// 加载io自己的证书，以及ca证书库
-		log.Printf("VIA双向SSL")
-		serverSSLConfig := &tls.Config{
-			Certificates: []tls.Certificate{ioCert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    caPool,
-		}
-		tlsCredentialsAsServer = credentials.NewTLS(serverSSLConfig)
-
-		clientSSLConfig := &tls.Config{
-			Certificates: []tls.Certificate{ioCert},
-			RootCAs:      caPool,
-		}
-		tlsCredentialsAsClient = credentials.NewTLS(clientSSLConfig)
-	} else {
-		log.Fatalf("Tls.Mode value error: %s", tlsConfig.Tls.Mode)
-	}
+	createTlsCredentials()
 }
 
-func loadCaPool() *x509.CertPool {
-	// Load certificate of the CA who signed server's certificate
-	pemServerCA, err := ioutil.ReadFile("cert/ca-cert.pem")
-	if err != nil {
-		log.Fatalf("failed to read CA cert file. %v", err)
-	}
+func createTlsCredentials() {
+	var err error
+	if sslConfig.Conf.Cipher == "ssl" {
+		if sslConfig.Conf.Mode == "one_way" {
+			tlsCredentialsAsServer, err = creds.NewServerTLSOneWay(sslConfig.Conf.SSL.IoCertFile, sslConfig.Conf.SSL.IoKeyFile)
+			if err != nil {
+				panic(err)
+			}
+			tlsCredentialsAsClient, err = creds.NewClientTLSOneWay(sslConfig.Conf.SSL.CaCertFile)
+			if err != nil {
+				panic(err)
+			}
+		} else if sslConfig.Conf.Mode == "two_way" {
+			tlsCredentialsAsServer, err = creds.NewServerTLSTwoWay(sslConfig.Conf.SSL.CaCertFile, sslConfig.Conf.SSL.IoCertFile, sslConfig.Conf.SSL.IoKeyFile)
+			if err != nil {
+				panic(err)
+			}
+			tlsCredentialsAsClient, err = creds.NewClientTLSTwoWay(sslConfig.Conf.SSL.CaCertFile, sslConfig.Conf.SSL.IoCertFile, sslConfig.Conf.SSL.IoKeyFile)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			log.Fatalf("error mode in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+		}
+	} else if sslConfig.Conf.Cipher == "gmssl" {
+		if sslConfig.Conf.Mode == "one_way" {
+			tlsCredentialsAsServer, err = creds.NewServerGMTLSOneWay(
+				sslConfig.Conf.GMSSL.IoSignCertFile, sslConfig.Conf.GMSSL.IoSignKeyFile,
+				sslConfig.Conf.GMSSL.IoEncryptCertFile, sslConfig.Conf.GMSSL.IoEncryptKeyFile,
+			)
+			if err != nil {
+				panic(err)
+			}
 
-	caPool := x509.NewCertPool()
-	if !caPool.AppendCertsFromPEM(pemServerCA) {
-		log.Fatalf("failed to add CA cert to cert pool. %v", err)
-	}
+			tlsCredentialsAsClient, err = creds.NewClientGMTLSOneWay(sslConfig.Conf.GMSSL.CaCertFile)
+			if err != nil {
+				panic(err)
+			}
 
-	return caPool
+		} else if sslConfig.Conf.Mode == "two_way" {
+			tlsCredentialsAsServer, err = creds.NewServerGMTLSTwoWay(
+				sslConfig.Conf.GMSSL.CaCertFile,
+				sslConfig.Conf.GMSSL.IoSignCertFile, sslConfig.Conf.GMSSL.IoSignKeyFile,
+				sslConfig.Conf.GMSSL.IoEncryptCertFile, sslConfig.Conf.GMSSL.IoEncryptKeyFile,
+			)
+
+			if err != nil {
+				panic(err)
+			}
+
+			tlsCredentialsAsClient, err = creds.NewClientGMTLSTwoWay(
+				sslConfig.Conf.GMSSL.CaCertFile,
+				sslConfig.Conf.GMSSL.IoSignCertFile, sslConfig.Conf.GMSSL.IoSignKeyFile,
+				sslConfig.Conf.GMSSL.IoEncryptCertFile, sslConfig.Conf.GMSSL.IoEncryptKeyFile,
+			)
+			if err != nil {
+				panic(err)
+			}
+
+		} else {
+			log.Fatalf("error mode in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+		}
+	} else {
+		log.Fatalf("error cilper in ssl-conf.yml, %s", sslConfig.Conf.Mode)
+	}
 }

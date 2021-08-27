@@ -2,7 +2,8 @@ package proxy
 
 import (
 	"fmt"
-	"google.golang.org/grpc/encoding"
+	"github.com/bglmmz/grpc"
+	"github.com/bglmmz/grpc/encoding"
 	"log"
 	"reflect"
 
@@ -13,7 +14,7 @@ import (
 //
 // See CodecWithParent.
 // 以protobuf原生codec为默认codec，实现了一个透明的Marshal和Unmarshal
-func Codec() encoding.Codec {
+func Codec() grpc.Codec {
 	return CodecWithParent(&protoCodec{})
 }
 
@@ -23,7 +24,7 @@ func Codec() encoding.Codec {
 // to the schema of the forwarded messages. It basically treats a gRPC message frame as raw bytes.
 // However, if the server handler, or the client caller are not proxy-internal functions it will fall back
 // to trying to decode the message using a fallback codec.
-func CodecWithParent(fallback encoding.Codec) encoding.Codec {
+func CodecWithParent(fallback encoding.Codec) grpc.Codec {
 	return &rawCodec{fallback}
 }
 
@@ -75,6 +76,10 @@ func (c *rawCodec) Name() string {
 	return fmt.Sprintf("custom raw codec")
 }
 
+func (c *rawCodec) String() string {
+	return fmt.Sprintf("custom raw codec")
+}
+
 // protoCodec是protobuf的编码器实现，它是缺省的原生编码器
 type protoCodec struct{}
 
@@ -89,5 +94,9 @@ func (protoCodec) Unmarshal(data []byte, v interface{}) error {
 }
 
 func (protoCodec) Name() string {
+	return "default raw codec"
+}
+
+func (protoCodec) String() string {
 	return "default raw codec"
 }

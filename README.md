@@ -30,8 +30,8 @@ go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:10031
 
 其中
 
-- tls:
-tls配置文件，配置VIA代理服务要求的安全模式（SSL模式），以及SSL模式时需要的各种证书。
+- ssl:
+ssl配置文件，配置VIA代理服务要求的安全模式（SSL模式），以及SSL模式时需要的各种证书。
 
 - address：
 表示VIA服务的监听地址
@@ -57,19 +57,19 @@ go run ./cmd/via/main.go -address 0.0.0.0:10031
 
 1. 启动一个VIA服务：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:10031
+go run ./cmd/via/main.go -ssl conf/ssl-conf.yml -address 0.0.0.0:10031
 ```
 2. 启动这个VIA服务后面的task服务：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:20031
+go run ./test/cmd/math/main.go -ssl conf/ssl-conf.yml -partner partner_1 -address 0.0.0.0:10040 -localVia 0.0.0.0:10031 -destVia 0.0.0.0:20031
 ```
 3. 启动另一个VIA服务：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -regAddr 0.0.0.0:20031 -proxyAddr 0.0.0.0:20032
+go run ./cmd/via/main.go -ssl conf/ssl-conf.yml -address 0.0.0.0:20031
 ```
 4. 启动这个VIA服务后面的task服务：
 ```
-go run ./test/cmd/math/main.go -tls conf/tls.yml -partner partner_2 -address 0.0.0.0:20040 -localVia 0.0.0.0:20031 -destVia 0.0.0.0:10031
+go run ./test/cmd/math/main.go -ssl conf/ssl-conf.yml -partner partner_2 -address 0.0.0.0:20040 -localVia 0.0.0.0:20031 -destVia 0.0.0.0:10031
 ```
 
 在两个启动的task服务的控制台，按提示输入命令，即可演示各种模式grpc调用。

@@ -1,0 +1,35 @@
+conf:
+  # cipher options: ssl, gmssl
+  cipher: gmssl
+  # mode options: one_way, two_way
+  mode: one_way
+  ssl:
+    # CA cert
+    caCertFile: cert/ca.crt
+    # VIA server certs
+    viaCertFile: cert/server.crt
+    viaKeyFile: cert/server.key
+
+    # io client certs, only valuable while mode=two_way
+    ioCertFile: cert/client.crt
+    ioKeyFile: cert/client.key
+
+  gmssl:
+    # CA cert
+    caCertFile: cert/gm_cert/ca.crt
+
+    # VIA server certs
+    viaSignCertFile: cert/gm_cert/server_sign.crt
+    viaSignKeyFile: cert/gm_cert/server_sign.key
+    viaEncryptCertFile: cert/gm_cert/server_encrypt.crt
+    viaEncryptKeyFile: cert/gm_cert/server_encrypt.key
+
+    # io client certs, only valuable while mode=two_way
+    ioSignCertFile: cert/gm_cert/client_sign.crt
+    ioSignKeyFile: cert/gm_cert/client_sign.key
+    ioEncryptCertFile: cert/gm_cert/client_encrypt.crt
+    ioEncryptKeyFile: cert/gm_cert/client_encrypt.key
+
+
+
+
