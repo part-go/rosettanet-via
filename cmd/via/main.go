@@ -18,7 +18,7 @@ import (
 	"time"
 	"via/conf"
 	"via/proxy"
-	"via/register"
+	"via/via"
 )
 
 var (
@@ -43,9 +43,9 @@ func NewVIAServer() *VIAServer {
 	return &VIAServer{}
 }
 
-func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*register.Boolean, error) {
+func (t *VIAServer) Signup(ctx context.Context, req *via.SignupReq) (*via.Boolean, error) {
 
-	registeredTask := &proxy.RegisteredTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
+	signupTask := &proxy.SignupTask{TaskId: req.TaskId, PartyId: req.PartyId, ServiceType: req.ServiceType, Address: req.Address}
 
 	log.Printf("收到注册请求：%v", req)
 
@@ -56,28 +56,28 @@ func (t *VIAServer) Register(ctx context.Context, req *register.RegisterReq) (*r
 		var conn *grpc.ClientConn
 		var err error
 		if tlsEnabled {
-			log.Printf("回拨local task server with secure, %s", registeredTask.Address)
-			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithTransportCredentials(tlsCredentialsAsClient))
+			log.Printf("回拨local task server with secure, %s", signupTask.Address)
+			conn, err = grpc.DialContext(ctx, signupTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithTransportCredentials(tlsCredentialsAsClient))
 		} else {
-			log.Printf("回拨local task server with insecure, %s", registeredTask.Address)
-			conn, err = grpc.DialContext(ctx, registeredTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
+			log.Printf("回拨local task server with insecure, %s", signupTask.Address)
+			conn, err = grpc.DialContext(ctx, signupTask.Address, grpc.WithDefaultCallOptions(grpc.ForceCodec(proxy.Codec())), grpc.WithInsecure())
 		}
 
 		if err != nil {
 			log.Printf("回拨local task server失败")
-			return &register.Boolean{Result: false}, err
+			return &via.Boolean{Result: false}, err
 		}
 
 		//用taskId_partyId作为请求者的唯一标识，把conn保存到map中。
-		registeredTask.Conn = conn
-		proxy.RegisteredTaskMap[registeredTask.TaskId+"_"+registeredTask.PartyId] = registeredTask
+		signupTask.Conn = conn
+		proxy.RegisteredTaskMap[signupTask.TaskId+"_"+signupTask.PartyId] = signupTask
 
 		log.Printf("回拨local task server成功")
 
-		return &register.Boolean{Result: true}, nil
+		return &via.Boolean{Result: true}, nil
 	} else {
 		log.Printf("获取local task server节点信息失败")
-		return &register.Boolean{Result: false}, errors.New("failed to retrieve the task server peer info")
+		return &via.Boolean{Result: false}, errors.New("failed to retrieve the task server peer info")
 	}
 }
 
@@ -107,7 +107,7 @@ func main() {
 	}
 
 	//注册本身提供的服务
-	register.RegisterRegisterServiceServer(viaServer, NewVIAServer())
+	via.RegisterVIAServiceServer(viaServer, NewVIAServer())
 
 	go func() {
 		viaServer.Serve(viaListener)
@@ -183,7 +183,7 @@ func init() {
 
 func loadCaPool() *x509.CertPool {
 	// Load certificate of the CA who signed server's certificate
-	pemServerCA, err := ioutil.ReadFile("cert/ca-cert.pem")
+	pemServerCA, err := ioutil.ReadFile("cert/ca.crt")
 	if err != nil {
 		log.Fatalf("failed to read CA cert file. %v", err)
 	}
