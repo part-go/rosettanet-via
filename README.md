@@ -1,3 +1,7 @@
+
+
+
+
 ### VIA服务说明 
 
 VIA服务，既提供注册服务，以便本地task服务注册任务信息；也为远程task服务提供代理服务，以便访问本地task服务。
@@ -12,6 +16,13 @@ MetadataPartyIdKey = "party_id"
 ```
 
 #### VIA注册服务go代码生成：
+
+组件版本：
+
+- protoc v3.7.0
+- go get github.com/golang/protobuf/protoc-gen-go@v1.3.0
+- go get github.com/golang/protobuf/proto@v1.3.0
+
 ```
 protoc --go_out=plugins=grpc:. register/proto/*.proto
 ```
