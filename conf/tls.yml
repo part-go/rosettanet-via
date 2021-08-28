@@ -1,6 +1,6 @@
 tls:
   #tls mode options: one_way, two_way
-  mode: one_way
+  mode: two_way
 
   viaCertFile: cert/server.crt
   viaKeyFile: cert/server.key

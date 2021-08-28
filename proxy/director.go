@@ -6,7 +6,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"log"
 )
 
 // StreamDirector returns a gRPC ClientConn to be used to forward the call to.
@@ -42,7 +41,7 @@ const MetadataPartyIdKey = "party_id"
 func GetDirector() StreamDirector {
 	director := func(ctx context.Context, fullName string) (context.Context, *grpc.ClientConn, error) {
 		md, ok := metadata.FromIncomingContext(ctx)
-		log.Printf("收到的metadata: %v", md)
+		// log.Printf("收到的metadata: %v", md)
 		if ok {
 			if taskId, exists := md[MetadataTaskIdKey]; exists {
 				if partyId, exists := md[MetadataPartyIdKey]; exists {
