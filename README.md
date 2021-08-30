@@ -1,7 +1,4 @@
 
-
-
-
 ### VIA服务说明 
 
 VIA服务，既提供注册服务，以便本地task服务注册任务信息；也为远程task服务提供代理服务，以便访问本地task服务。
@@ -18,25 +15,30 @@ MetadataPartyIdKey = "party_id"
 #### VIA注册服务go代码生成：
 
 组件版本：
-
+- grpc-go v1.15.0
 - protoc v3.7.0
-- go get github.com/golang/protobuf/protoc-gen-go@v1.3.0
-- go get github.com/golang/protobuf/proto@v1.3.0
+- protobuf-go v1.3.0
 
 ```
 protoc --go_out=plugins=grpc:. register/proto/*.proto
 ```
 
+- 生成后的via.pb.go，需要修改下Import的包，把grpc "google.golang.org/grpc" 改成 grpc "github.com/bglmmz/grpc"
+
+
+
 #### 测试用task服务go代码生成：
 ```
 protoc --go_out=plugins=grpc:. test/proto/*.proto
 ```
+- 生成后的math.pb.go，需要修改下Import的包，把grpc "google.golang.org/grpc" 改成 grpc "github.com/bglmmz/grpc"
+
 
 #### VIA源码的启动方式
 
 - SSL方式：
 ```
-go run ./cmd/via/main.go -tls conf/tls.yml -address 0.0.0.0:10031
+go run ./cmd/via/main.go -ssl conf/ssl-conf.yml -address 0.0.0.0:10031
 ```
 
 其中
